@@ -1,0 +1,25 @@
+# Service systemd — démarre l'auto-impression au boot et la relance si elle tombe.
+# Installer :
+#   sudo cp feels-print.service /etc/systemd/system/
+#   (adapter User, WorkingDirectory et ExecStart au chemin réel)
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now feels-print
+# Logs : journalctl -u feels-print -f
+
+[Unit]
+Description=FEEL's auto-impression cuisine (Firestore -> Munbyn)
+After=network-online.target cups.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=feels
+WorkingDirectory=/home/feels/imprimante
+ExecStart=/usr/bin/node src/index.js
+Restart=always
+RestartSec=5
+# Chromium (Puppeteer) a parfois besoin de ces variables hors session graphique.
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

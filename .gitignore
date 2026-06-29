@@ -1,0 +1,7 @@
+node_modules/
+.env
+service-account.json
+# Toute clé service account Firebase (quel que soit son nom de fichier)
+*service-account*.json
+*-firebase-adminsdk-*.json
+*.pdf
