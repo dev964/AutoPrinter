@@ -1,0 +1,15 @@
+# Secrets
+.env
+*service-account*.json
+*-firebase-adminsdk-*.json
+
+# Dépendances : reconstruites proprement dans l'image via npm ci
+node_modules
+
+# Inutile / lourd dans l'image
+.git
+.gitignore
+*.pdf
+*.md
+setup.sh
+feels-print.service

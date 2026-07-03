@@ -134,9 +134,11 @@ async function main() {
 
       for (const o of orders) {
         if (seen.has(o.id)) continue;
-        seen.add(o.id); // marqué vu même si on n'imprime pas → pas de doublon
-        if (isTestOrder(o)) continue;
-        if (!isOrderConfirmed(o)) continue; // paiement non confirmé → ignoré
+        if (isTestOrder(o)) { seen.add(o.id); continue; } // test : jamais imprimé, marqué vu
+        // Paiement pas encore confirmé (ex. livraison en ligne : authorizing → captured) :
+        // on NE marque PAS `seen` → on réévaluera au snapshot où il passe captured.
+        if (!isOrderConfirmed(o)) continue;
+        seen.add(o.id); // confirmé : marqué vu au moment où on imprime → une seule fois
         console.log(`[watch] 🆕 ${labelOf(o)} → impression`);
         printQueue.push(o);
         void drainQueue(db, () => dailyLabelMessage);

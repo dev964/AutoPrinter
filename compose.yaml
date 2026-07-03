@@ -1,0 +1,27 @@
+# ── Service d'auto-impression FEEL's, conteneurisé ───────────────────────────
+# Lance :   docker compose up -d --build      (démarre en arrière-plan)
+# Logs :    docker compose logs -f
+# Arrêt :   docker compose down
+services:
+  feels-print:
+    build: .                     # construit l'image depuis le Dockerfile local
+    image: feels-print:latest
+    restart: unless-stopped      # relance auto si crash/reboot (remplace systemd)
+
+    # Partage la pile réseau de l'hôte → le conteneur atteint le CUPS de l'hôte.
+    network_mode: host
+
+    # Variables NON secrètes lues depuis .env (KITCHEN_OPERATOR_ID, PRINTER_NAME…)
+    env_file:
+      - .env
+
+    environment:
+      # Le client `lp` parle au CUPS de l'hôte (port 631).
+      CUPS_SERVER: localhost:631
+      # On force le chemin de la clé DANS le conteneur (voir volume ci-dessous),
+      # ce qui remplace la valeur du .env.
+      SERVICE_ACCOUNT_PATH: /app/service-account.json
+
+    # Secrets montés au RUNTIME (jamais dans l'image), en lecture seule (:ro).
+    volumes:
+      - ./date-dropp-3st6ap-firebase-adminsdk-fbsvc-5f2d435b6f.json:/app/service-account.json:ro
