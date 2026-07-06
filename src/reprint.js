@@ -16,6 +16,7 @@
 const fs = require('fs');
 const path = require('path');
 const admin = require('firebase-admin');
+const { loadDotEnv, resolvePrinter } = require('./config');
 const { isOrderConfirmed } = require('./lib');
 const { renderTicketHtml } = require('./ticket');
 const { printHtml, htmlToPdf, closeBrowser } = require('./print');
@@ -24,18 +25,7 @@ loadDotEnv();
 const SERVICE_ACCOUNT_PATH =
   process.env.SERVICE_ACCOUNT_PATH || process.env.GOOGLE_APPLICATION_CREDENTIALS;
 const KITCHEN_OPERATOR_ID = process.env.KITCHEN_OPERATOR_ID;
-const PRINTER_NAME = process.env.PRINTER_NAME || 'Munbyn';
 const ACTIVE_STATUSES = ['pending', 'accepted', 'preparing', 'ready_for_assembly'];
-
-function loadDotEnv() {
-  try {
-    const txt = fs.readFileSync(path.join(__dirname, '..', '.env'), 'utf8');
-    for (const line of txt.split('\n')) {
-      const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/i);
-      if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
-    }
-  } catch { /* pas de .env : on se fie à l'environnement */ }
-}
 
 const args = process.argv.slice(2);
 const has = (f) => args.includes(f);
@@ -60,6 +50,15 @@ const isTestOrder = (o) =>
     process.exit(1);
   }
   if (!KITCHEN_OPERATOR_ID) { console.error('KITCHEN_OPERATOR_ID manquant.'); process.exit(1); }
+
+  let printer;
+  try {
+    printer = resolvePrinter();
+  } catch (e) {
+    console.error(e.message);
+    process.exit(1);
+  }
+  console.log(`Imprimante : ${printer.key} → ${printer.cupsName} (${printer.format})\n`);
 
   const sa = require(path.resolve(SERVICE_ACCOUNT_PATH));
   admin.initializeApp({ credential: admin.credential.cert(sa) });
@@ -111,15 +110,15 @@ const isTestOrder = (o) =>
 
   for (const o of orders) {
     try {
-      const html = await renderTicketHtml(db, o, dailyLabelMessage);
+      const html = await renderTicketHtml(db, o, dailyLabelMessage, { format: printer.format });
       if (dry) {
-        const pdf = await htmlToPdf(html, o.id.slice(0, 6));
+        const pdf = await htmlToPdf(html, o.id.slice(0, 6), printer.format);
         const out = path.join(__dirname, '..', `reprint-${o.id.slice(0, 6)}.pdf`);
         fs.copyFileSync(pdf, out);
         fs.unlinkSync(pdf);
         console.log(`[dry] ${labelOf(o)} → ${out}`);
       } else {
-        const job = await printHtml(html, { printerName: PRINTER_NAME, basename: o.id.slice(0, 6) });
+        const job = await printHtml(html, { printerName: printer.cupsName, format: printer.format, basename: o.id.slice(0, 6) });
         console.log(`[reprint] ✅ ${labelOf(o)} → ${job}`);
       }
     } catch (e) {

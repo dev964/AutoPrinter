@@ -7,6 +7,7 @@
 
 const QRCode = require('qrcode');
 const { escapeHtml, CANONICAL_COPEAT_VAT_BPS, computeVatBreakdown, splitMenuDisplay } = require('./lib');
+const { getFormat } = require('./formats');
 
 const INSTAGRAM_URL = 'https://www.instagram.com/feels_eat?igsh=ODd5NGs0YmZxbGRj';
 const INSTA_LOGO = `<svg class="ig" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><rect x="2.2" y="2.2" width="19.6" height="19.6" rx="5.4"/><circle cx="12" cy="12" r="4.4"/><circle cx="17.6" cy="6.4" r="1.15" fill="#000" stroke="none"/></svg>`;
@@ -66,9 +67,14 @@ function formatDateFr(order) {
  * @param {FirebaseFirestore.Firestore} db  Firestore (Admin SDK)
  * @param {object} order                    Document foodOrders (avec id)
  * @param {string} dailyLabelMessage        Message du jour (kitchenOperators)
+ * @param {{ format?: string }} [opts]       Format papier (100x150, 80mm)
  * @returns {Promise<string>} HTML complet imprimable
  */
-async function renderTicketHtml(db, order, dailyLabelMessage = '') {
+async function renderTicketHtml(db, order, dailyLabelMessage = '', opts = {}) {
+  const pageFmt = getFormat(opts.format);
+  const scale = pageFmt.contentScale;
+  const designW = 100;
+  const designH = 150;
   const items = order.items ?? [];
   const hasPrices = items.some((it) => typeof it.unitPriceCents === 'number');
 
@@ -217,14 +223,19 @@ async function renderTicketHtml(db, order, dailyLabelMessage = '') {
   const message = dailyLabelMessage.trim();
   const printedAt = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 
+  const scaleWrap = scale < 1
+    ? `.scale-wrap { transform: scale(${scale}); transform-origin: top left; width: ${designW}mm; height: ${designH}mm; }`
+    : '';
+
   return `<!doctype html>
 <html lang="fr"><head><meta charset="utf-8"><title>Ticket ${escapeHtml(order.id.slice(0, 6))}</title>
 <style>
-  @page { size: 100mm 150mm; margin: 0; }
+  @page { size: ${pageFmt.widthMm}mm ${pageFmt.heightMm}mm; margin: 0; }
   * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; color: #000; background: #fff; }
-  body {
-    width: 100mm; height: 150mm; padding: 3.5mm 4mm;
+  html, body { margin: 0; padding: 0; color: #000; background: #fff; overflow: hidden; }
+  ${scaleWrap}
+  .ticket {
+    width: ${designW}mm; height: ${designH}mm; padding: 3.5mm 4mm;
     display: flex; flex-direction: column;
     font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
     font-size: 2.9mm; line-height: 1.28;
@@ -264,6 +275,7 @@ async function renderTicketHtml(db, order, dailyLabelMessage = '') {
   .msg { font-size: 2.9mm; font-style: italic; white-space: pre-wrap; word-break: break-word; }
 </style></head>
 <body>
+  <div class="${scale < 1 ? 'scale-wrap ticket' : 'ticket'}">
   <div class="wordmark">FEEL<span class="s">&rsquo;s</span></div>
   <div class="mode"><span class="ordernum">${escapeHtml(numLabel)}</span><span>${escapeHtml(modeLabel)}</span></div>
   <div class="client">${escapeHtml(order.customerName ?? 'Client')}</div>
@@ -279,6 +291,7 @@ async function renderTicketHtml(db, order, dailyLabelMessage = '') {
       <div class="qr">${qrSvg}</div>
     </div>
     <div class="msg">${message ? escapeHtml(message) : 'Bonne dégustation !'}</div>
+  </div>
   </div>
 </body></html>`;
 }

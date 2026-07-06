@@ -1,10 +1,13 @@
-// Rend le faux ticket de démonstration en PDF (sans imprimante ni Firebase),
-// pour vérifier la fidélité visuelle. Sortie : ./ticket-test.pdf
+// Rend le faux ticket de démonstration en PDF (sans imprimante ni Firebase).
 //   node src/render-test.js
+//   node src/render-test.js --printer=pos80
 const fs = require('fs/promises');
 const path = require('path');
+const { loadDotEnv, resolvePrinter } = require('./config');
 const { renderTicketHtml } = require('./ticket');
 const { htmlToPdf, closeBrowser } = require('./print');
+
+loadDotEnv();
 
 const fakeOrder = {
   id: 'TEST01abcdef',
@@ -25,15 +28,15 @@ const fakeOrder = {
   totalEurosCents: 2140,
 };
 
-// Stub Firestore → fallback TVA canonique, aucune connexion réseau.
 const stubDb = { collection: () => ({ get: async () => ({ docs: [] }), doc: () => ({ collection: () => ({ get: async () => ({ docs: [] }) }) }) }) };
 
 (async () => {
-  const html = await renderTicketHtml(stubDb, fakeOrder, 'Merci et à bientôt chez FEEL’s !');
-  const tmp = await htmlToPdf(html, 'demo');
-  const out = path.join(__dirname, '..', 'ticket-test.pdf');
+  const printer = resolvePrinter();
+  const html = await renderTicketHtml(stubDb, fakeOrder, 'Merci et à bientôt chez FEEL’s !', { format: printer.format });
+  const tmp = await htmlToPdf(html, 'demo', printer.format);
+  const out = path.join(__dirname, '..', `ticket-test-${printer.key}.pdf`);
   await fs.copyFile(tmp, out);
   await fs.unlink(tmp).catch(() => {});
   await closeBrowser();
-  console.log('PDF généré :', out);
+  console.log(`PDF généré (${printer.key}, ${printer.format}) :`, out);
 })().catch((e) => { console.error(e); process.exit(1); });

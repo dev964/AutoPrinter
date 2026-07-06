@@ -9,9 +9,10 @@
 
 const fs = require('fs');
 const path = require('path');
+const { loadDotEnv, resolvePrinter } = require('./config');
 const { printHtml, htmlToPdf, closeBrowser } = require('./print');
 
-const PRINTER_NAME = process.env.PRINTER_NAME || 'Munbyn';
+loadDotEnv();
 const args = process.argv.slice(2);
 const dry = args.includes('--dry');
 const out = (args.find((a) => a.startsWith('--out=')) || '').replace('--out=', '')
@@ -66,14 +67,15 @@ const HTML = `<!doctype html>
 
 (async () => {
   try {
+    const printer = resolvePrinter();
     if (dry) {
-      const pdf = await htmlToPdf(HTML, 'notice');
+      const pdf = await htmlToPdf(HTML, 'notice', '100x150');
       fs.copyFileSync(pdf, out);
       fs.unlinkSync(pdf);
       console.log('PDF généré :', out);
     } else {
-      const job = await printHtml(HTML, { printerName: PRINTER_NAME, basename: 'notice' });
-      console.log(`Étiquette envoyée à « ${PRINTER_NAME} » → ${job}`);
+      const job = await printHtml(HTML, { printerName: printer.cupsName, format: '100x150', basename: 'notice' });
+      console.log(`Étiquette envoyée à « ${printer.cupsName} » (${printer.key}) → ${job}`);
     }
   } catch (e) {
     console.error('[notice] échec :', e.message);

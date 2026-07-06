@@ -6,7 +6,8 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "print-test": "node src/index.js --test-print"
+    "print-test": "node src/index.js --test-print",
+    "list-printers": "node src/index.js --list-printers"
   },
   "engines": {
     "node": ">=18"

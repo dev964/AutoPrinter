@@ -65,7 +65,25 @@ Renseigner dans `.env` :
   le committer**.
 - `KITCHEN_OPERATOR_ID` : l'id de la cuisine (champ `kitchenOperatorId` des
   commandes).
-- `PRINTER_NAME` : le nom CUPS relevé via `lpstat -p`.
+- `PRINTERS` + `ACTIVE_PRINTER` : profils d'imprimantes (voir ci-dessous).
+
+### Choisir l'imprimante (deux imprimantes branchées)
+
+Le service supporte plusieurs files CUPS. Exemple Munbyn (étiquettes 100×150)
++ POS80 (rouleau 80 mm) :
+
+```env
+PRINTERS=munbyn:Munbyn:100x150,pos80:POS80:80mm
+ACTIVE_PRINTER=munbyn
+```
+
+Changer d'imprimante :
+- **Permanent** : modifier `ACTIVE_PRINTER` dans `.env` puis `sudo systemctl restart feels-print`
+- **Test ponctuel** : `node src/index.js --test-print --printer=pos80`
+- **Lister** : `npm run list-printers`
+
+Le driver POS80 (ZiJiang) s'installe via `setup.sh` (variable `POS80_DRIVER_INSTALL`
+si le chemin par défaut ne convient pas).
 
 ## Tester
 
