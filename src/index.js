@@ -6,11 +6,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 const fs = require('fs');
-const admin = require('firebase-admin');
 const { loadDotEnv, resolvePrinter, listPrinterProfiles } = require('./config');
-const { isOrderConfirmed } = require('./lib');
-const { renderTicketHtml } = require('./ticket');
-const { printHtml, closeBrowser } = require('./print');
 
 loadDotEnv();
 
@@ -18,6 +14,42 @@ const SERVICE_ACCOUNT_PATH =
   process.env.SERVICE_ACCOUNT_PATH || process.env.GOOGLE_APPLICATION_CREDENTIALS;
 const KITCHEN_OPERATOR_ID = process.env.KITCHEN_OPERATOR_ID;
 const PRINT_DELAY_MS = Number(process.env.PRINT_DELAY_MS ?? 1200);
+
+// Commandes légères : pas besoin de firebase-admin ni puppeteer.
+if (process.argv.includes('--list-printers')) {
+  const profiles = listPrinterProfiles();
+  if (profiles.size === 0) {
+    console.log('Aucun profil (définir PRINTERS ou PRINTER_NAME dans .env).');
+  } else {
+    let active;
+    try { active = resolvePrinter().key; } catch { active = null; }
+    console.log('Profils imprimantes :');
+    for (const [key, p] of profiles) {
+      const mark = key === active ? ' ← active' : '';
+      console.log(`  ${key}\t${p.cupsName}\t${p.format}${mark}`);
+    }
+    console.log('\nChanger : ACTIVE_PRINTER=<clé> dans .env puis restart, ou --printer=<clé> en CLI.');
+  }
+  process.exit(0);
+}
+
+if (process.argv.includes('--check-config')) {
+  console.log('SERVICE_ACCOUNT_PATH =', SERVICE_ACCOUNT_PATH || '(manquant)');
+  console.log('KITCHEN_OPERATOR_ID  =', KITCHEN_OPERATOR_ID || '(manquant)');
+  try {
+    const p = resolvePrinter();
+    console.log('ACTIVE_PRINTER       =', p.key, `→ ${p.cupsName} (${p.format})`);
+  } catch (e) {
+    console.log('ACTIVE_PRINTER       =', e.message);
+  }
+  console.log('clé lisible ?        =', SERVICE_ACCOUNT_PATH ? fs.existsSync(SERVICE_ACCOUNT_PATH) : false);
+  process.exit(0);
+}
+
+const admin = require('firebase-admin');
+const { isOrderConfirmed } = require('./lib');
+const { renderTicketHtml } = require('./ticket');
+const { printHtml, closeBrowser } = require('./print');
 
 const ACTIVE_STATUSES = ['pending', 'accepted', 'preparing', 'ready_for_assembly'];
 
@@ -68,20 +100,6 @@ function isTestOrder(o) {
 // ── Démarrage ────────────────────────────────────────────────────────────────
 async function main() {
   if (process.argv.includes('--test-print')) return testPrint();
-  if (process.argv.includes('--list-printers')) return listPrinters();
-
-  if (process.argv.includes('--check-config')) {
-    console.log('SERVICE_ACCOUNT_PATH =', SERVICE_ACCOUNT_PATH || '(manquant)');
-    console.log('KITCHEN_OPERATOR_ID  =', KITCHEN_OPERATOR_ID || '(manquant)');
-    try {
-      const p = getActivePrinter();
-      console.log('ACTIVE_PRINTER       =', p.key, `→ ${p.cupsName} (${p.format})`);
-    } catch (e) {
-      console.log('ACTIVE_PRINTER       =', e.message);
-    }
-    console.log('clé lisible ?        =', SERVICE_ACCOUNT_PATH ? fs.existsSync(SERVICE_ACCOUNT_PATH) : false);
-    return;
-  }
 
   if (!SERVICE_ACCOUNT_PATH) fail('SERVICE_ACCOUNT_PATH manquant (clé service account JSON).');
   if (!KITCHEN_OPERATOR_ID) fail('KITCHEN_OPERATOR_ID manquant (id de la cuisine à écouter).');
@@ -147,22 +165,6 @@ async function main() {
       process.exit(0);
     });
   }
-}
-
-function listPrinters() {
-  const profiles = listPrinterProfiles();
-  if (profiles.size === 0) {
-    console.log('Aucun profil (définir PRINTERS ou PRINTER_NAME dans .env).');
-    return;
-  }
-  let active;
-  try { active = getActivePrinter().key; } catch { active = null; }
-  console.log('Profils imprimantes :');
-  for (const [key, p] of profiles) {
-    const mark = key === active ? ' ← active' : '';
-    console.log(`  ${key}\t${p.cupsName}\t${p.format}${mark}`);
-  }
-  console.log('\nChanger : ACTIVE_PRINTER=<clé> dans .env puis restart, ou --printer=<clé> en CLI.');
 }
 
 async function testPrint() {
