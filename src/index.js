@@ -24,20 +24,23 @@
 
 const fs = require('fs');
 const admin = require('firebase-admin');
+const { loadDotEnv, resolvePrinter } = require('./config');
 const { isOrderConfirmed } = require('./lib');
 const { renderTicketHtml } = require('./ticket');
 const { printHtml, closeBrowser } = require('./print');
 
-// Charge le .env AVANT de lire la config ci-dessous (les const sont évaluées au
-// chargement du module ; loadDotEnv est hissée car déclarée en `function`).
+// Charge le .env AVANT de lire la config ci-dessous.
 loadDotEnv();
 
 // ── Config (variables d'environnement / .env) ───────────────────────────────
 const SERVICE_ACCOUNT_PATH =
   process.env.SERVICE_ACCOUNT_PATH || process.env.GOOGLE_APPLICATION_CREDENTIALS;
 const KITCHEN_OPERATOR_ID = process.env.KITCHEN_OPERATOR_ID;
-const PRINTER_NAME = process.env.PRINTER_NAME || 'Munbyn';
 const PRINT_DELAY_MS = Number(process.env.PRINT_DELAY_MS ?? 1200);
+
+// Profil imprimante actif (nom file CUPS + format papier), résolu au démarrage
+// via config.js (PRINTERS/ACTIVE_PRINTER, repli PRINTER_NAME). Partagé auto+manuel.
+let activePrinter = null;
 
 // Attente max du `dailyOrderNumber` avant impression avec repli #ref (ms).
 const NUMBER_WAIT_MS = Number(process.env.NUMBER_WAIT_MS ?? 8000);
@@ -46,17 +49,6 @@ const STALE_JOB_MS = Number(process.env.STALE_JOB_MS ?? 5 * 60 * 1000);
 
 // Statuts « commande active » — strictement ceux de l'écran cuisine/envoi.
 const ACTIVE_STATUSES = ['pending', 'accepted', 'preparing', 'ready_for_assembly'];
-
-// Charge un .env minimal (KEY=VALUE) sans dépendance externe.
-function loadDotEnv() {
-  try {
-    const txt = fs.readFileSync(require('path').join(__dirname, '..', '.env'), 'utf8');
-    for (const line of txt.split('\n')) {
-      const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/i);
-      if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
-    }
-  } catch { /* pas de .env : on se fie à l'environnement */ }
-}
 
 // ── File d'impression sérialisée (une impression à la fois, auto + manuel) ───
 // Chaque tâche : { order, onDone?: (err|null, jobId?) => void }
@@ -70,9 +62,10 @@ async function drainQueue(db, getDailyMessage) {
       const task = printQueue.shift();
       const { order } = task;
       try {
-        const html = await renderTicketHtml(db, order, getDailyMessage());
+        const html = await renderTicketHtml(db, order, getDailyMessage(), { format: activePrinter.format });
         const jobId = await printHtml(html, {
-          printerName: PRINTER_NAME,
+          printerName: activePrinter.cupsName,
+          format: activePrinter.format,
           basename: order.id.slice(0, 6),
         });
         console.log(`[print] ✅ ${labelOf(order)} → ${jobId}`);
@@ -133,7 +126,12 @@ async function main() {
   if (process.argv.includes('--check-config')) {
     console.log('SERVICE_ACCOUNT_PATH =', SERVICE_ACCOUNT_PATH || '(manquant)');
     console.log('KITCHEN_OPERATOR_ID  =', KITCHEN_OPERATOR_ID || '(manquant)');
-    console.log('PRINTER_NAME         =', PRINTER_NAME);
+    try {
+      const p = resolvePrinter();
+      console.log('imprimante active    =', `${p.key} → ${p.cupsName} (${p.format})`);
+    } catch (e) {
+      console.log('imprimante active    = (aucune) —', e.message);
+    }
     console.log('clé lisible ?        =', SERVICE_ACCOUNT_PATH ? fs.existsSync(SERVICE_ACCOUNT_PATH) : false);
     return;
   }
@@ -142,11 +140,17 @@ async function main() {
   if (!KITCHEN_OPERATOR_ID) fail('KITCHEN_OPERATOR_ID manquant (id de la cuisine à écouter).');
   if (!fs.existsSync(SERVICE_ACCOUNT_PATH)) fail(`Clé introuvable : ${SERVICE_ACCOUNT_PATH}`);
 
+  try {
+    activePrinter = resolvePrinter();
+  } catch (e) {
+    fail(e.message); // aucune imprimante configurée (PRINTERS ou PRINTER_NAME)
+  }
+
   const serviceAccount = require(require('path').resolve(SERVICE_ACCOUNT_PATH));
   admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
   const db = admin.firestore();
 
-  console.log(`[init] projet=${serviceAccount.project_id} opérateur=${KITCHEN_OPERATOR_ID} imprimante=${PRINTER_NAME}`);
+  console.log(`[init] projet=${serviceAccount.project_id} opérateur=${KITCHEN_OPERATOR_ID} imprimante=${activePrinter.cupsName} (${activePrinter.format})`);
 
   // Message du jour (kitchenOperators/{id}.dailyLabelMessage), tenu à jour.
   let dailyLabelMessage = '';
@@ -318,7 +322,12 @@ async function handlePrintJob(db, docSnap, jobsInFlight, getDailyMessage) {
 
 // ── Mode test imprimante (sans Firebase) : imprime un faux ticket ───────────
 async function testPrint() {
-  console.log('[test] génération d’un ticket de démonstration…');
+  try {
+    activePrinter = resolvePrinter();
+  } catch (e) {
+    fail(e.message);
+  }
+  console.log(`[test] génération d’un ticket de démonstration… (${activePrinter.cupsName}, ${activePrinter.format})`);
   const fakeOrder = {
     id: 'TEST01abcdef',
     dailyOrderNumber: 42,
@@ -339,9 +348,9 @@ async function testPrint() {
   };
   // Stub Firestore : provoque le fallback canonique (pas de vatRates/catalogue).
   const stubDb = { collection: () => ({ get: async () => ({ docs: [] }), doc: () => ({ collection: () => ({ get: async () => ({ docs: [] }) }) }) }) };
-  const html = await renderTicketHtml(stubDb, fakeOrder, 'Merci et à bientôt chez FEEL’s !');
-  const job = await printHtml(html, { printerName: PRINTER_NAME, basename: 'test' });
-  console.log(`[test] envoyé à « ${PRINTER_NAME} » → ${job}`);
+  const html = await renderTicketHtml(stubDb, fakeOrder, 'Merci et à bientôt chez FEEL’s !', { format: activePrinter.format });
+  const job = await printHtml(html, { printerName: activePrinter.cupsName, format: activePrinter.format, basename: 'test' });
+  console.log(`[test] envoyé à « ${activePrinter.cupsName} » → ${job}`);
   await closeBrowser();
 }
 
