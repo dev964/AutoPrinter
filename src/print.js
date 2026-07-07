@@ -127,4 +127,4 @@ async function closeBrowser() {
   }
 }
 
-module.exports = { printHtml, htmlToPdf, closeBrowser };
+module.exports = { printHtml, htmlToPdf, closeBrowser, getBrowser };
