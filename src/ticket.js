@@ -238,7 +238,7 @@ async function renderTicketHtml(db, order, dailyLabelMessage = '', opts = {}) {
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; color: #000; background: #fff; ${continuous ? '' : 'overflow: hidden;'} }
   .ticket {
-    width: ${designW}mm; ${continuous ? '' : `height: ${designH}mm;`} padding: 3.5mm 1mm;
+    width: ${designW}mm; ${continuous ? '' : `height: ${designH}mm;`} padding: 3.5mm 5mm;
     display: flex; flex-direction: column;
     font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
     font-size: ${fz(2.9)}; line-height: 1.28;
