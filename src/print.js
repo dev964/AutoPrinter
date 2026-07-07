@@ -34,9 +34,13 @@ const CUT_MARGIN_MM = 3;
 /** Rend le HTML en PDF et renvoie le chemin du fichier temporaire. */
 async function htmlToPdf(html, basename, formatName = '100x150') {
   const fmt = getFormat(formatName);
-  // Le design est pensé pour 100 mm de large ; on le met à l'échelle vers la
-  // largeur papier via l'option `scale` de Puppeteer (zoom du rendu).
-  const scale = fmt.widthMm / DESIGN_WIDTH_MM;
+  // Largeur cible = zone IMPRIMABLE (souvent < papier), pour ne rien couper à
+  // droite. Ajustable sans rebuild via ROLL_PRINT_WIDTH_MM. Le design (100 mm)
+  // est mis à l'échelle dessus via l'option `scale` de Puppeteer.
+  const targetWidthMm = Number(
+    process.env.ROLL_PRINT_WIDTH_MM ?? fmt.printWidthMm ?? fmt.widthMm,
+  );
+  const scale = targetWidthMm / DESIGN_WIDTH_MM;
 
   const browser = await getBrowser();
   const page = await browser.newPage();
@@ -58,13 +62,13 @@ async function htmlToPdf(html, basename, formatName = '100x150') {
     await page.pdf({
       path: file,
       printBackground: true,
-      width: `${fmt.widthMm}mm`,
+      width: `${targetWidthMm}mm`,
       height: `${heightMm}mm`,
       scale,
       margin: { top: 0, right: 0, bottom: 0, left: 0 },
       preferCSSPageSize: false,
     });
-    return { path: file, widthMm: fmt.widthMm, heightMm };
+    return { path: file, widthMm: targetWidthMm, heightMm };
   } finally {
     await page.close();
   }
@@ -81,12 +85,17 @@ async function htmlToPdf(html, basename, formatName = '100x150') {
  */
 async function lpPrint(pdfPath, printerName, dims = {}) {
   const args = ['-d', printerName];
-  if (dims.widthMm && dims.heightMm) {
+  // Média `Custom` à la taille EXACTE du PDF : utile seulement si le driver
+  // gère les tailles variables. Beaucoup de drivers thermiques n'ont que des
+  // `PageSize` fixes (ex. POS80 : X80mmY210/297/3276mm) → l'option est ignorée
+  // et pagine sur une page fixe. On ne l'active donc que sur demande explicite ;
+  // sinon on pilote la longueur via LP_OPTIONS (PageSize + Cutting + FeedDist).
+  if (process.env.PRINT_MEDIA_CUSTOM === '1' && dims.widthMm && dims.heightMm) {
     args.push('-o', `media=Custom.${Math.round(dims.widthMm)}x${Math.round(dims.heightMm)}mm`);
   }
-  // Marges nulles (supprime la marge ajoutée par le driver/CUPS).
+  // Marges nulles (supprime la marge ajoutée par le driver/CUPS quand honorées).
   args.push('-o', 'page-left=0', '-o', 'page-right=0', '-o', 'page-top=0', '-o', 'page-bottom=0');
-  // Options `lp` supplémentaires libres (ex. `-o Resolution=203dpi`), sans rebuild.
+  // Options `lp` propres à l'imprimante (PageSize, Cutting, FeedDist…), sans rebuild.
   const extra = (process.env.LP_OPTIONS || '').trim();
   if (extra) args.push(...extra.split(/\s+/));
   args.push(pdfPath);
