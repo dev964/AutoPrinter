@@ -2,7 +2,8 @@
 
 Petit service Node qui **écoute Firestore** (collection `foodOrders`) exactement
 comme l'écran cuisine de l'app, et **imprime le ticket client identique** dès
-qu'une nouvelle commande confirmée arrive — sur l'imprimante **Munbyn** via CUPS.
+qu'une nouvelle commande confirmée arrive — sur une **imprimante CUPS** (ex :
+Munbyn 100×150 ou POS80 80mm).
 
 Remplace le mécanisme `--kiosk-printing` de Chrome (qui n'existe pas sur les
 navigateurs Android/Kiwi des tablettes). Tourne sur un PC sous **Debian 12**.
@@ -16,7 +17,7 @@ navigateurs Android/Kiwi des tablettes). Tourne sur un PC sous **Debian 12**.
 - **Anti-rafale** : au démarrage, mémorise les commandes déjà présentes **sans
   imprimer** ; n'imprime que celles qui arrivent ensuite, **une fois chacune**.
 - Rendu du ticket **identique** à `printTicketClient.ts` (TVA, formules, QR
-  Instagram) via Puppeteer/Chromium → PDF 100×150 → `lp`.
+  Instagram) via Puppeteer/Chromium → PDF → `lp` (CUPS).
 
 ## Installation express (serveur Debian/Ubuntu)
 
@@ -44,11 +45,13 @@ Les sections ci-dessous détaillent les étapes manuelles si besoin.
      libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
      libxrandr2 libgbm1 libpango-1.0-0 libasound2
    ```
-3. **Driver Munbyn x86_64** (CUPS) depuis le support Munbyn, puis ajouter
-   l'imprimante (USB recommandé) et régler son **média par défaut sur
-   100×150 mm, marges 0**. Vérifier le nom de la file :
+3. **CUPS : files & drivers imprimantes** :
+   - Munbyn (étiquettes) : média par défaut **100×150 mm** (marges 0)
+   - POS80 (ticket) : file CUPS dédiée (souvent via driver ZiJiang)
+   
+   Vérifier les noms de files :
    ```bash
-   lpstat -p          # -> note le nom exact, à mettre dans PRINTER_NAME
+   lpstat -p
    ```
 
 ## Installation
@@ -84,6 +87,34 @@ Changer d'imprimante :
 
 Le driver POS80 (ZiJiang) s'installe via `setup.sh` (variable `POS80_DRIVER_INSTALL`
 si le chemin par défaut ne convient pas).
+
+## Docker (docker compose)
+
+Le conteneur utilise le **CUPS de l'hôte** (voir `compose.yaml` : `network_mode: host`
+et `CUPS_SERVER=localhost:631`). Les drivers et files CUPS doivent donc être
+installés/configurés **sur l'hôte**, pas dans le conteneur.
+
+Démarrer / mettre à jour :
+
+```bash
+docker compose up -d --build
+docker compose logs -f --tail=50
+```
+
+Basculer l'imprimante :
+- Modifier `ACTIVE_PRINTER` dans `.env`
+- Puis relancer (un rebuild n'est nécessaire que si le code a changé) :
+
+```bash
+docker compose up -d
+```
+
+Tests depuis le conteneur :
+
+```bash
+docker compose exec feels-print node src/index.js --list-printers
+docker compose exec feels-print node src/index.js --test-print --printer=pos80
+```
 
 ## Tester
 
