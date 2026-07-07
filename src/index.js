@@ -28,6 +28,7 @@ const { loadDotEnv, resolvePrinter } = require('./config');
 const { isOrderConfirmed } = require('./lib');
 const { renderTicketHtml } = require('./ticket');
 const { printHtml, closeBrowser } = require('./print');
+const { printEscpos } = require('./escpos');
 
 // Charge le .env AVANT de lire la config ci-dessous.
 loadDotEnv();
@@ -41,6 +42,32 @@ const PRINT_DELAY_MS = Number(process.env.PRINT_DELAY_MS ?? 1200);
 // Profil imprimante actif (nom file CUPS + format papier), résolu au démarrage
 // via config.js (PRINTERS/ACTIVE_PRINTER, repli PRINTER_NAME). Partagé auto+manuel.
 let activePrinter = null;
+
+// Force le mode d'impression : 'escpos' | 'pdf'. Par défaut, on suit le format
+// (rouleau thermique → ESC/POS, étiquette pré-découpée → CUPS/PDF).
+const PRINT_MODE = (process.env.PRINT_MODE || '').trim().toLowerCase();
+
+/**
+ * Envoie un ticket déjà rendu (HTML) à l'imprimante active, via ESC/POS (trame
+ * brute, hauteur/coupe exactes) ou CUPS/PDF selon le format / PRINT_MODE.
+ * @returns {Promise<string>} identifiant du job CUPS.
+ */
+function sendToPrinter(html, basename) {
+  const fmt = activePrinter.pageFormat || {};
+  const useEscpos = PRINT_MODE === 'escpos' || (PRINT_MODE !== 'pdf' && fmt.escpos === true);
+  if (useEscpos) {
+    return printEscpos(html, {
+      printerName: activePrinter.cupsName,
+      widthDots: fmt.widthDots,
+      basename,
+    });
+  }
+  return printHtml(html, {
+    printerName: activePrinter.cupsName,
+    format: activePrinter.format,
+    basename,
+  });
+}
 
 // Attente max du `dailyOrderNumber` avant impression avec repli #ref (ms).
 const NUMBER_WAIT_MS = Number(process.env.NUMBER_WAIT_MS ?? 8000);
@@ -63,11 +90,7 @@ async function drainQueue(db, getDailyMessage) {
       const { order } = task;
       try {
         const html = await renderTicketHtml(db, order, getDailyMessage(), { format: activePrinter.format });
-        const jobId = await printHtml(html, {
-          printerName: activePrinter.cupsName,
-          format: activePrinter.format,
-          basename: order.id.slice(0, 6),
-        });
+        const jobId = await sendToPrinter(html, order.id.slice(0, 6));
         console.log(`[print] ✅ ${labelOf(order)} → ${jobId}`);
         task.onDone?.(null, jobId);
       } catch (err) {
@@ -349,7 +372,7 @@ async function testPrint() {
   // Stub Firestore : provoque le fallback canonique (pas de vatRates/catalogue).
   const stubDb = { collection: () => ({ get: async () => ({ docs: [] }), doc: () => ({ collection: () => ({ get: async () => ({ docs: [] }) }) }) }) };
   const html = await renderTicketHtml(stubDb, fakeOrder, 'Merci et à bientôt chez FEEL’s !', { format: activePrinter.format });
-  const job = await printHtml(html, { printerName: activePrinter.cupsName, format: activePrinter.format, basename: 'test' });
+  const job = await sendToPrinter(html, 'test');
   console.log(`[test] envoyé à « ${activePrinter.cupsName} » → ${job}`);
   await closeBrowser();
 }
