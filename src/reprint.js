@@ -112,7 +112,7 @@ const isTestOrder = (o) =>
     try {
       const html = await renderTicketHtml(db, o, dailyLabelMessage, { format: printer.format });
       if (dry) {
-        const pdf = await htmlToPdf(html, o.id.slice(0, 6), printer.format);
+        const { path: pdf } = await htmlToPdf(html, o.id.slice(0, 6), printer.format);
         const out = path.join(__dirname, '..', `reprint-${o.id.slice(0, 6)}.pdf`);
         fs.copyFileSync(pdf, out);
         fs.unlinkSync(pdf);

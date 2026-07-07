@@ -33,7 +33,7 @@ const stubDb = { collection: () => ({ get: async () => ({ docs: [] }), doc: () =
 (async () => {
   const printer = resolvePrinter();
   const html = await renderTicketHtml(stubDb, fakeOrder, 'Merci et à bientôt chez FEEL’s !', { format: printer.format });
-  const tmp = await htmlToPdf(html, 'demo', printer.format);
+  const { path: tmp } = await htmlToPdf(html, 'demo', printer.format);
   const out = path.join(__dirname, '..', `ticket-test-${printer.key}.pdf`);
   await fs.copyFile(tmp, out);
   await fs.unlink(tmp).catch(() => {});

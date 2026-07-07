@@ -64,15 +64,32 @@ async function htmlToPdf(html, basename, formatName = '100x150') {
       margin: { top: 0, right: 0, bottom: 0, left: 0 },
       preferCSSPageSize: false,
     });
-    return file;
+    return { path: file, widthMm: fmt.widthMm, heightMm };
   } finally {
     await page.close();
   }
 }
 
-/** Envoie un PDF à l'imprimante via CUPS. */
-async function lpPrint(pdfPath, printerName) {
-  const args = ['-d', printerName, pdfPath];
+/**
+ * Envoie un PDF à l'imprimante via CUPS.
+ * On impose un média `Custom` EXACTEMENT à la taille du PDF + marges à zéro :
+ * sinon CUPS recadre/rétrécit le ticket dans un média par défaut plus grand
+ * (d'où la marge en haut et sur les côtés). Options ajustables via LP_OPTIONS.
+ * @param {string} pdfPath
+ * @param {string} printerName
+ * @param {{widthMm?: number, heightMm?: number}} [dims]
+ */
+async function lpPrint(pdfPath, printerName, dims = {}) {
+  const args = ['-d', printerName];
+  if (dims.widthMm && dims.heightMm) {
+    args.push('-o', `media=Custom.${Math.round(dims.widthMm)}x${Math.round(dims.heightMm)}mm`);
+  }
+  // Marges nulles (supprime la marge ajoutée par le driver/CUPS).
+  args.push('-o', 'page-left=0', '-o', 'page-right=0', '-o', 'page-top=0', '-o', 'page-bottom=0');
+  // Options `lp` supplémentaires libres (ex. `-o Resolution=203dpi`), sans rebuild.
+  const extra = (process.env.LP_OPTIONS || '').trim();
+  if (extra) args.push(...extra.split(/\s+/));
+  args.push(pdfPath);
   const { stdout } = await execFileP('lp', args);
   return stdout.trim();
 }
@@ -85,9 +102,9 @@ async function lpPrint(pdfPath, printerName) {
  * @param {string} [opts.basename]
  */
 async function printHtml(html, { printerName, format = '100x150', basename = 'ticket' }) {
-  const pdf = await htmlToPdf(html, basename, format);
+  const { path: pdf, widthMm, heightMm } = await htmlToPdf(html, basename, format);
   try {
-    return await lpPrint(pdf, printerName);
+    return await lpPrint(pdf, printerName, { widthMm, heightMm });
   } finally {
     fs.unlink(pdf).catch(() => {});
   }

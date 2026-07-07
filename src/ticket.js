@@ -225,6 +225,12 @@ async function renderTicketHtml(db, order, dailyLabelMessage = '', opts = {}) {
   const message = dailyLabelMessage.trim();
   const printedAt = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 
+  // Échelle typographique globale : agrandit toutes les polices en conservant
+  // leurs proportions (chaque taille est multipliée par le même facteur).
+  // Réglable via .env `TICKET_FONT_SCALE` (1 = taille d'origine).
+  const FONT_SCALE = Number(process.env.TICKET_FONT_SCALE ?? 1.15);
+  const fz = (mm) => `${+(mm * FONT_SCALE).toFixed(2)}mm`;
+
   return `<!doctype html>
 <html lang="fr"><head><meta charset="utf-8"><title>Ticket ${escapeHtml(order.id.slice(0, 6))}</title>
 <style>
@@ -235,41 +241,41 @@ async function renderTicketHtml(db, order, dailyLabelMessage = '', opts = {}) {
     width: ${designW}mm; ${continuous ? '' : `height: ${designH}mm;`} padding: 3.5mm 1mm;
     display: flex; flex-direction: column;
     font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-    font-size: 2.9mm; line-height: 1.28;
+    font-size: ${fz(2.9)}; line-height: 1.28;
   }
-  .wordmark { font-family: 'Playfair Display','Times New Roman',Georgia,serif; text-align: center; font-weight: 700; font-size: 7mm; line-height: 1; padding-bottom: 1mm; border-bottom: 0.4mm solid #000; }
-  .wordmark .s { font-style: italic; font-size: 4.6mm; }
-  .mode { text-align: center; font-weight: 800; font-size: 2.7mm; letter-spacing: 0.3mm; border: 0.35mm solid #000; border-radius: 1mm; padding: 0.5mm 0; margin: 1.2mm 0; display: flex; align-items: center; justify-content: center; gap: 1.5mm; }
-  .mode .ordernum { font-size: 6.5mm; font-weight: 800; letter-spacing: 0; }
-  .client { font-size: 4mm; font-weight: 800; line-height: 1.1; word-break: break-word; }
-  .meta { font-size: 2.7mm; }
-  .idrow { display: flex; justify-content: space-between; font-size: 2.5mm; opacity: 0.75; margin: 0.4mm 0; }
+  .wordmark { font-family: 'Playfair Display','Times New Roman',Georgia,serif; text-align: center; font-weight: 700; font-size: ${fz(7)}; line-height: 1; padding-bottom: 1mm; border-bottom: 0.4mm solid #000; }
+  .wordmark .s { font-style: italic; font-size: ${fz(4.6)}; }
+  .mode { text-align: center; font-weight: 800; font-size: ${fz(2.7)}; letter-spacing: 0.3mm; border: 0.35mm solid #000; border-radius: 1mm; padding: 0.5mm 0; margin: 1.2mm 0; display: flex; align-items: center; justify-content: center; gap: 1.5mm; }
+  .mode .ordernum { font-size: ${fz(6.5)}; font-weight: 800; letter-spacing: 0; }
+  .client { font-size: ${fz(4)}; font-weight: 800; line-height: 1.1; word-break: break-word; }
+  .meta { font-size: ${fz(2.7)}; }
+  .idrow { display: flex; justify-content: space-between; font-size: ${fz(2.5)}; opacity: 0.75; margin: 0.4mm 0; }
   .divider { border-top: 0.3mm dashed #000; margin: 1.2mm 0; }
   table { width: 100%; border-collapse: collapse; }
   td { vertical-align: top; padding: 0.4mm 0; }
   .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .items .qty { font-weight: 800; width: 7mm; }
   .items .name { padding-right: 1.5mm; }
-  .items .cat td { font-weight: 700; font-size: 2.6mm; padding-top: 1.2mm; text-transform: uppercase; letter-spacing: 0.2mm; }
+  .items .cat td { font-weight: 700; font-size: ${fz(2.6)}; padding-top: 1.2mm; text-transform: uppercase; letter-spacing: 0.2mm; }
   .items .formule td { border-top: 0.3mm solid #000; padding-top: 1.2mm; }
   .items .fline { padding-left: 2.5mm; font-weight: 600; }
-  .items .fline .suppl { font-weight: 400; font-size: 2.3mm; opacity: 0.8; }
-  .items .fdetail { padding-left: 2.5mm; font-size: 2.4mm; font-style: italic; opacity: 0.75; padding-bottom: 0.6mm; }
-  .opts { font-size: 2.3mm; opacity: 0.8; }
+  .items .fline .suppl { font-weight: 400; font-size: ${fz(2.3)}; opacity: 0.8; }
+  .items .fdetail { padding-left: 2.5mm; font-size: ${fz(2.4)}; font-style: italic; opacity: 0.75; padding-bottom: 0.6mm; }
+  .opts { font-size: ${fz(2.3)}; opacity: 0.8; }
   .summary { margin-top: 1mm; }
   .totals { border-top: 0.3mm solid #000; padding-top: 0.8mm; }
-  .totals .grand td { font-weight: 800; font-size: 3.8mm; border-top: 0.3mm solid #000; padding-top: 0.8mm; }
-  .vat { margin-top: 1mm; font-size: 2.5mm; }
+  .totals .grand td { font-weight: 800; font-size: ${fz(3.8)}; border-top: 0.3mm solid #000; padding-top: 0.8mm; }
+  .vat { margin-top: 1mm; font-size: ${fz(2.5)}; }
   .vat .vh td { font-weight: 700; border-bottom: 0.2mm solid #000; }
   .vat .vt td { font-weight: 800; border-top: 0.3mm solid #000; padding-top: 0.7mm; }
-  .pay { margin-top: 1.2mm; text-align: center; font-weight: 800; font-size: 2.9mm; padding: 0.9mm; border: 0.3mm solid #000; border-radius: 1mm; }
+  .pay { margin-top: 1.2mm; text-align: center; font-weight: 800; font-size: ${fz(2.9)}; padding: 0.9mm; border: 0.3mm solid #000; border-radius: 1mm; }
   .pay.due { background: #000; color: #fff; }
   .footer { margin-top: ${continuous ? '2mm' : 'auto'}; display: grid; grid-template-columns: 20mm 1fr; gap: 2.5mm; padding-top: 1.5mm; border-top: 0.4mm solid #000; align-items: center; }
   .qrblock { display: flex; flex-direction: column; align-items: center; gap: 0.8mm; }
-  .follow { display: flex; align-items: center; gap: 1mm; font-weight: 800; font-size: 2.4mm; white-space: nowrap; }
+  .follow { display: flex; align-items: center; gap: 1mm; font-weight: 800; font-size: ${fz(2.4)}; white-space: nowrap; }
   .follow .ig { width: 3.4mm; height: 3.4mm; flex: none; }
   .qr { width: 18mm; height: 18mm; } .qr svg { width: 100%; height: 100%; display: block; }
-  .msg { font-size: 2.9mm; font-style: italic; white-space: pre-wrap; word-break: break-word; }
+  .msg { font-size: ${fz(2.9)}; font-style: italic; white-space: pre-wrap; word-break: break-word; }
 </style></head>
 <body>
   <div class="ticket">
