@@ -85,17 +85,17 @@ async function htmlToPdf(html, basename, formatName = '100x150') {
  */
 async function lpPrint(pdfPath, printerName, dims = {}) {
   const args = ['-d', printerName];
-  // Média `Custom` à la taille EXACTE du PDF : utile seulement si le driver
-  // gère les tailles variables. Beaucoup de drivers thermiques n'ont que des
-  // `PageSize` fixes (ex. POS80 : X80mmY210/297/3276mm) → l'option est ignorée
-  // et pagine sur une page fixe. On ne l'active donc que sur demande explicite ;
-  // sinon on pilote la longueur via LP_OPTIONS (PageSize + Cutting + FeedDist).
-  if (process.env.PRINT_MEDIA_CUSTOM === '1' && dims.widthMm && dims.heightMm) {
+  // Média `Custom` à la taille EXACTE du PDF → la HAUTEUR s'adapte au contenu
+  // (comme un ticket texte), au lieu d'être bloquée sur une page fixe du driver.
+  // NE JAMAIS forcer `-o PageSize=...` en plus via LP_OPTIONS : ça écrase ce
+  // média Custom, refixe la hauteur (210 mm) et peut sortir des pages blanches.
+  if (dims.widthMm && dims.heightMm) {
     args.push('-o', `media=Custom.${Math.round(dims.widthMm)}x${Math.round(dims.heightMm)}mm`);
   }
   // Marges nulles (supprime la marge ajoutée par le driver/CUPS quand honorées).
   args.push('-o', 'page-left=0', '-o', 'page-right=0', '-o', 'page-top=0', '-o', 'page-bottom=0');
-  // Options `lp` propres à l'imprimante (PageSize, Cutting, FeedDist…), sans rebuild.
+  // Options `lp` propres à l'imprimante (FeedDist, Cutting…), sans rebuild.
+  // NB : éviter PageSize ici (cf. ci-dessus).
   const extra = (process.env.LP_OPTIONS || '').trim();
   if (extra) args.push(...extra.split(/\s+/));
   args.push(pdfPath);
