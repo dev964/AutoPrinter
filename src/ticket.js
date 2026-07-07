@@ -72,7 +72,9 @@ function formatDateFr(order) {
  */
 async function renderTicketHtml(db, order, dailyLabelMessage = '', opts = {}) {
   const pageFmt = getFormat(opts.format);
-  const scale = pageFmt.contentScale;
+  // Rouleau continu → hauteur libre (adaptée au contenu par print.js) ;
+  // étiquette pré-découpée → hauteur fixe. Le scaling largeur est fait au PDF.
+  const continuous = pageFmt.continuous === true;
   const designW = 100;
   const designH = 150;
   const items = order.items ?? [];
@@ -223,19 +225,14 @@ async function renderTicketHtml(db, order, dailyLabelMessage = '', opts = {}) {
   const message = dailyLabelMessage.trim();
   const printedAt = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 
-  const scaleWrap = scale < 1
-    ? `.scale-wrap { transform: scale(${scale}); transform-origin: top left; width: ${designW}mm; height: ${designH}mm; }`
-    : '';
-
   return `<!doctype html>
 <html lang="fr"><head><meta charset="utf-8"><title>Ticket ${escapeHtml(order.id.slice(0, 6))}</title>
 <style>
-  @page { size: ${pageFmt.widthMm}mm ${pageFmt.heightMm}mm; margin: 0; }
+  @page { margin: 0; }
   * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; color: #000; background: #fff; overflow: hidden; }
-  ${scaleWrap}
+  html, body { margin: 0; padding: 0; color: #000; background: #fff; ${continuous ? '' : 'overflow: hidden;'} }
   .ticket {
-    width: ${designW}mm; height: ${designH}mm; padding: 3.5mm 4mm;
+    width: ${designW}mm; ${continuous ? '' : `height: ${designH}mm;`} padding: 3.5mm 1mm;
     display: flex; flex-direction: column;
     font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
     font-size: 2.9mm; line-height: 1.28;
@@ -243,7 +240,7 @@ async function renderTicketHtml(db, order, dailyLabelMessage = '', opts = {}) {
   .wordmark { font-family: 'Playfair Display','Times New Roman',Georgia,serif; text-align: center; font-weight: 700; font-size: 7mm; line-height: 1; padding-bottom: 1mm; border-bottom: 0.4mm solid #000; }
   .wordmark .s { font-style: italic; font-size: 4.6mm; }
   .mode { text-align: center; font-weight: 800; font-size: 2.7mm; letter-spacing: 0.3mm; border: 0.35mm solid #000; border-radius: 1mm; padding: 0.5mm 0; margin: 1.2mm 0; display: flex; align-items: center; justify-content: center; gap: 1.5mm; }
-  .mode .ordernum { font-size: 4mm; letter-spacing: 0; }
+  .mode .ordernum { font-size: 6.5mm; font-weight: 800; letter-spacing: 0; }
   .client { font-size: 4mm; font-weight: 800; line-height: 1.1; word-break: break-word; }
   .meta { font-size: 2.7mm; }
   .idrow { display: flex; justify-content: space-between; font-size: 2.5mm; opacity: 0.75; margin: 0.4mm 0; }
@@ -267,7 +264,7 @@ async function renderTicketHtml(db, order, dailyLabelMessage = '', opts = {}) {
   .vat .vt td { font-weight: 800; border-top: 0.3mm solid #000; padding-top: 0.7mm; }
   .pay { margin-top: 1.2mm; text-align: center; font-weight: 800; font-size: 2.9mm; padding: 0.9mm; border: 0.3mm solid #000; border-radius: 1mm; }
   .pay.due { background: #000; color: #fff; }
-  .footer { margin-top: auto; display: grid; grid-template-columns: 20mm 1fr; gap: 2.5mm; padding-top: 1.5mm; border-top: 0.4mm solid #000; align-items: center; }
+  .footer { margin-top: ${continuous ? '2mm' : 'auto'}; display: grid; grid-template-columns: 20mm 1fr; gap: 2.5mm; padding-top: 1.5mm; border-top: 0.4mm solid #000; align-items: center; }
   .qrblock { display: flex; flex-direction: column; align-items: center; gap: 0.8mm; }
   .follow { display: flex; align-items: center; gap: 1mm; font-weight: 800; font-size: 2.4mm; white-space: nowrap; }
   .follow .ig { width: 3.4mm; height: 3.4mm; flex: none; }
@@ -275,7 +272,7 @@ async function renderTicketHtml(db, order, dailyLabelMessage = '', opts = {}) {
   .msg { font-size: 2.9mm; font-style: italic; white-space: pre-wrap; word-break: break-word; }
 </style></head>
 <body>
-  <div class="${scale < 1 ? 'scale-wrap ticket' : 'ticket'}">
+  <div class="ticket">
   <div class="wordmark">FEEL<span class="s">&rsquo;s</span></div>
   <div class="mode"><span class="ordernum">${escapeHtml(numLabel)}</span><span>${escapeHtml(modeLabel)}</span></div>
   <div class="client">${escapeHtml(order.customerName ?? 'Client')}</div>

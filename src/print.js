@@ -24,24 +24,45 @@ function getBrowser() {
   return browserPromise;
 }
 
+// Largeur de référence du design du ticket (cf. ticket.js). Le format papier
+// est obtenu en mettant à l'échelle depuis cette largeur.
+const DESIGN_WIDTH_MM = 100;
+// Marge de coupe sous le contenu pour les rouleaux (évite de rogner la dernière
+// ligne / laisse le massicot couper proprement).
+const CUT_MARGIN_MM = 3;
+
 /** Rend le HTML en PDF et renvoie le chemin du fichier temporaire. */
 async function htmlToPdf(html, basename, formatName = '100x150') {
   const fmt = getFormat(formatName);
-  const widthIn = fmt.widthMm / 25.4;
-  const heightIn = fmt.heightMm / 25.4;
+  // Le design est pensé pour 100 mm de large ; on le met à l'échelle vers la
+  // largeur papier via l'option `scale` de Puppeteer (zoom du rendu).
+  const scale = fmt.widthMm / DESIGN_WIDTH_MM;
 
   const browser = await getBrowser();
   const page = await browser.newPage();
   try {
     await page.setContent(html, { waitUntil: 'networkidle0' });
     const file = path.join(os.tmpdir(), `feels-ticket-${basename}-${process.pid}.pdf`);
+
+    // Hauteur papier : fixe (étiquette pré-découpée) ou adaptée au contenu (rouleau).
+    let heightMm = fmt.heightMm;
+    if (fmt.continuous) {
+      // Hauteur réelle du ticket (px CSS @96dpi), convertie en mm puis mise à l'échelle.
+      const heightPx = await page.evaluate(() => {
+        const el = document.querySelector('.ticket') || document.body;
+        return Math.ceil(el.getBoundingClientRect().height);
+      });
+      heightMm = (heightPx * 25.4) / 96 * scale + CUT_MARGIN_MM;
+    }
+
     await page.pdf({
       path: file,
       printBackground: true,
-      width: `${widthIn}in`,
-      height: `${heightIn}in`,
+      width: `${fmt.widthMm}mm`,
+      height: `${heightMm}mm`,
+      scale,
       margin: { top: 0, right: 0, bottom: 0, left: 0 },
-      preferCSSPageSize: true,
+      preferCSSPageSize: false,
     });
     return file;
   } finally {
