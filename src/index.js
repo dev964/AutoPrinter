@@ -142,6 +142,19 @@ async function fetchOrderWaitingNumber(db, orderId) {
   }
 }
 
+// ── Perte de connexion Firestore : on relance le process ─────────────────────
+// Un listener onSnapshot qui meurt (réseau pas prêt au boot, coupure prolongée)
+// ne se rétablit PAS tout seul : le SDK reste coincé sur « Exceeded retries ».
+// Plutôt que de rester vivant en panne silencieuse (aucun ticket, aucun crash),
+// on sort en erreur → `restart: unless-stopped` relance une instance saine
+// (Docker temporise en cas de coupure réelle, donc pas de boucle serrée).
+function onListenerLost(where) {
+  return (err) => {
+    console.error(`[${where}] connexion Firestore perdue : ${err.message} — redémarrage.`);
+    process.exit(1);
+  };
+}
+
 // ── Démarrage ────────────────────────────────────────────────────────────────
 async function main() {
   if (process.argv.includes('--test-print')) return testPrint();
@@ -190,7 +203,7 @@ async function main() {
       if (next !== autoPrintEnabled) console.log(`[flag] auto-impression → ${next ? 'ON' : 'OFF'}`);
       autoPrintEnabled = next;
     },
-    (err) => console.warn('[flag] printSettings indisponible :', err.message),
+    onListenerLost('flag'),
   );
 
   // ── Repli borné pour l'attente du numéro (auto-impression) ─────────────────
@@ -260,7 +273,7 @@ async function main() {
         }
       }
     },
-    (err) => console.error('[watch] erreur snapshot :', err.code, err.message),
+    onListenerLost('watch'),
   );
 
   // ── Watcher printJobs : impression manuelle d'un ticket précis ─────────────
@@ -275,7 +288,7 @@ async function main() {
           void handlePrintJob(db, change.doc, jobsInFlight, () => dailyLabelMessage);
         }
       },
-      (err) => console.error('[jobs] erreur snapshot :', err.code, err.message),
+      onListenerLost('jobs'),
     );
 
   console.log('[watch] en écoute : commandes + flag + demandes manuelles… (Ctrl+C pour arrêter)');
