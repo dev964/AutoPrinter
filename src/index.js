@@ -29,6 +29,7 @@ const { isOrderConfirmed } = require('./lib');
 const { renderTicketHtml } = require('./ticket');
 const { printHtml, closeBrowser } = require('./print');
 const { printEscpos } = require('./escpos');
+const { renderTourTicketHtml } = require('./tourTicket');
 
 // Charge le .env AVANT de lire la config ci-dessous.
 loadDotEnv();
@@ -87,14 +88,30 @@ async function drainQueue(db, getDailyMessage) {
   try {
     while (printQueue.length) {
       const task = printQueue.shift();
-      const { order } = task;
       try {
-        const html = await renderTicketHtml(db, order, getDailyMessage(), { format: activePrinter.format });
-        const jobId = await sendToPrinter(html, order.id.slice(0, 6));
-        console.log(`[print] ✅ ${labelOf(order)} → ${jobId}`);
+        // AJOUT ISOLÉ — ticket de TOURNÉE (task.kind==='tour'). Le rendu commande
+        // ci-dessous (branche else) est INCHANGÉ.
+        let html;
+        let basename;
+        let label;
+        if (task.kind === 'tour') {
+          html = await renderTourTicketHtml(db, task.batchId, { format: activePrinter.format });
+          basename = `tour-${String(task.batchId).slice(0, 6)}`;
+          label = `Tournée ${String(task.batchId).slice(0, 6)}`;
+        } else {
+          const { order } = task;
+          html = await renderTicketHtml(db, order, getDailyMessage(), { format: activePrinter.format });
+          basename = order.id.slice(0, 6);
+          label = labelOf(order);
+        }
+        const jobId = await sendToPrinter(html, basename);
+        console.log(`[print] ✅ ${label} → ${jobId}`);
         task.onDone?.(null, jobId);
       } catch (err) {
-        console.error(`[print] ❌ ${labelOf(order)} :`, err.message);
+        const label = task.kind === 'tour'
+          ? `Tournée ${String(task.batchId).slice(0, 6)}`
+          : labelOf(task.order);
+        console.error(`[print] ❌ ${label} :`, err.message);
         task.onDone?.(err);
       }
       if (printQueue.length) await sleep(PRINT_DELAY_MS);
@@ -108,6 +125,14 @@ async function drainQueue(db, getDailyMessage) {
 function enqueuePrint(db, order, getDailyMessage) {
   return new Promise((resolve) => {
     printQueue.push({ order, onDone: (err, jobId) => resolve({ err, jobId }) });
+    void drainQueue(db, getDailyMessage);
+  });
+}
+
+/** Pousse un TICKET DE TOURNÉE dans la file et résout à l'impression (ou échec). */
+function enqueueTourPrint(db, batchId, getDailyMessage) {
+  return new Promise((resolve) => {
+    printQueue.push({ kind: 'tour', batchId, onDone: (err, jobId) => resolve({ err, jobId }) });
     void drainQueue(db, getDailyMessage);
   });
 }
@@ -332,6 +357,20 @@ async function handlePrintJob(db, docSnap, jobsInFlight, getDailyMessage) {
     });
     if (claim === 'stale') { console.log(`[job] ⏭️ ${id} obsolète → failed`); return; }
     if (claim !== 'claimed') return; // déjà pris par un autre snapshot/instance
+
+    // AJOUT ISOLÉ — ticket de TOURNÉE : rendu dédié via la file partagée. Le
+    // chemin commande (foodOrder) ci-dessous reste INCHANGÉ.
+    if (data.kind === 'tour') {
+      console.log(`[job] 🖨️ ${id} (${data.source ?? '?'}) → Tournée ${String(data.batchId).slice(0, 6)}`);
+      const { err, jobId } = await enqueueTourPrint(db, data.batchId, getDailyMessage);
+      if (err) {
+        await ref.update({ status: 'failed', error: err.message });
+      } else {
+        await ref.update({ status: 'printed', printedAt: FieldValue.serverTimestamp() });
+        console.log(`[job] ✅ ${id} → ${jobId}`);
+      }
+      return;
+    }
 
     const order = await fetchOrderWaitingNumber(db, data.orderId);
     if (!order) {
