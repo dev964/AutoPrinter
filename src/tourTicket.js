@@ -16,19 +16,33 @@
 // transite JAMAIS par le navigateur : lu/écrit côté serveur.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const { randomBytes } = require('node:crypto');
+const { randomBytes, randomInt } = require('node:crypto');
 const QRCode = require('qrcode');
 const { escapeHtml } = require('./lib');
 const { getFormat } = require('./formats');
 
-async function getOrMintPickupToken(db, batchId) {
+// Secret de récupération : `token` (encodé dans le QR) + `code` à 6 chiffres
+// (imprimé en clair, saisi à la main si le QR ne passe pas). Backfill paresseux
+// des tournées frappées avant l'ajout du code. Aligné sur `mintPickupSecret`
+// côté feels-backend.
+async function getOrMintPickupSecret(db, batchId) {
   const ref = db.collection('deliveryBatches').doc(batchId).collection('private').doc('pickup');
   const snap = await ref.get();
-  const existing = snap.exists ? snap.data().token : undefined;
-  if (existing) return existing;
+  const mintCode = () => String(randomInt(0, 1000000)).padStart(6, '0');
+  if (snap.exists) {
+    const d = snap.data() || {};
+    let token = d.token;
+    let code = d.code;
+    const patch = {};
+    if (!token) { token = randomBytes(24).toString('base64url'); patch.token = token; }
+    if (!code) { code = mintCode(); patch.code = code; }
+    if (Object.keys(patch).length > 0) await ref.set(patch, { merge: true });
+    return { token, code };
+  }
   const token = randomBytes(24).toString('base64url');
-  await ref.set({ token, createdAt: new Date() });
-  return token;
+  const code = mintCode();
+  await ref.set({ token, code, createdAt: new Date() });
+  return { token, code };
 }
 
 function itemsCountOf(data) {
@@ -71,7 +85,7 @@ async function renderTourTicketHtml(db, batchId, opts = {}) {
     });
   }
 
-  const token = await getOrMintPickupToken(db, batchId);
+  const { token, code } = await getOrMintPickupSecret(db, batchId);
   let qrSvg = '';
   try {
     qrSvg = await QRCode.toString(JSON.stringify({ b: batchId, t: token }), {
@@ -109,6 +123,12 @@ async function renderTourTicketHtml(db, batchId, opts = {}) {
   const qrBlock = qrSvg
     ? `<div class="qr">${qrSvg}</div><div class="qr-cap">Scannez pour récupérer</div>`
     : '';
+  // Code de récupération à 6 chiffres, imprimé EN BAS et EN GRAND (secours si le
+  // QR ne passe pas). Formaté « 123 456 » pour la lisibilité.
+  const codeFmt = code ? `${code.slice(0, 3)} ${code.slice(3)}` : '';
+  const codeBlock = codeFmt
+    ? `<div class="pickup-code"><span class="pc-label">Code de récupération</span><span class="pc-value">${codeFmt}</span></div>`
+    : '';
 
   return `<!doctype html>
 <html lang="fr"><head><meta charset="utf-8"><title>${escapeHtml(tourLabel)}</title>
@@ -141,6 +161,9 @@ async function renderTourTicketHtml(db, batchId, opts = {}) {
   .ord-meta { font-size: ${fz(2.5)}; opacity: 0.8; white-space: nowrap; }
   .warn { margin-top: 2.5mm; border: 0.4mm solid #000; border-radius: 1mm; padding: 1.5mm; font-size: ${fz(2.6)}; font-weight: 700; }
   .warn b { text-transform: uppercase; }
+  .pickup-code { margin-top: 3mm; text-align: center; border: 0.6mm solid #000; border-radius: 1.5mm; padding: 2mm 1.5mm; }
+  .pickup-code .pc-label { display: block; font-size: ${fz(2.6)}; font-weight: 800; letter-spacing: 0.3mm; text-transform: uppercase; }
+  .pickup-code .pc-value { display: block; margin-top: 1mm; font-family: 'JetBrains Mono','Courier New',monospace; font-weight: 800; font-size: ${fz(11)}; letter-spacing: 1.5mm; }
 </style></head>
 <body><div class="ticket">
   <div class="top">
@@ -155,6 +178,7 @@ async function renderTourTicketHtml(db, batchId, opts = {}) {
   <div class="counts"><span>${nbCommandes} cmd</span><span>·</span><span>${nbArrets} arrêt${nbArrets > 1 ? 's' : ''}</span><span>·</span><span>${platsLabel} plats</span></div>
   <div class="stops">${stopsHtml}</div>
   <div class="warn">⚠️ Une <b>commande</b> peut être répartie en <b>plusieurs sacs</b>. Vérifiez chaque <b>commande</b> ci-dessus — pas le nombre de sacs.</div>
+  ${codeBlock}
 </div></body></html>`;
 }
 
