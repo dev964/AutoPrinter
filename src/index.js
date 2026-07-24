@@ -94,7 +94,14 @@ async function drainQueue(db, getDailyMessage) {
         let html;
         let basename;
         let label;
-        if (task.kind === 'tour') {
+        if (task.kind === 'html') {
+          // PASSERELLE GÉNÉRIQUE : le HTML est rendu EN AMONT (drop-tools). Aucun
+          // code par type de ticket ici → la passerelle ne change plus quand un
+          // ticket évolue. Elle imprime simplement le document fourni.
+          html = task.html;
+          basename = task.basename || 'job';
+          label = task.label || 'Impression';
+        } else if (task.kind === 'tour') {
           html = await renderTourTicketHtml(db, task.batchId, { format: activePrinter.format });
           basename = `tour-${String(task.batchId).slice(0, 6)}`;
           label = `Tournée ${String(task.batchId).slice(0, 6)}`;
@@ -108,9 +115,11 @@ async function drainQueue(db, getDailyMessage) {
         console.log(`[print] ✅ ${label} → ${jobId}`);
         task.onDone?.(null, jobId);
       } catch (err) {
-        const label = task.kind === 'tour'
-          ? `Tournée ${String(task.batchId).slice(0, 6)}`
-          : labelOf(task.order);
+        const label = task.kind === 'html'
+          ? (task.label || 'Impression')
+          : task.kind === 'tour'
+            ? `Tournée ${String(task.batchId).slice(0, 6)}`
+            : labelOf(task.order);
         console.error(`[print] ❌ ${label} :`, err.message);
         task.onDone?.(err);
       }
@@ -133,6 +142,16 @@ function enqueuePrint(db, order, getDailyMessage) {
 function enqueueTourPrint(db, batchId, getDailyMessage) {
   return new Promise((resolve) => {
     printQueue.push({ kind: 'tour', batchId, onDone: (err, jobId) => resolve({ err, jobId }) });
+    void drainQueue(db, getDailyMessage);
+  });
+}
+
+/** GÉNÉRIQUE : pousse un HTML déjà rendu (rendu en amont, ex. drop-tools) et
+ *  résout à l'impression (ou échec). La passerelle n'a pas à connaître le type
+ *  de ticket — c'est le chemin cible pour tous les futurs tickets. */
+function enqueueHtmlPrint(db, { html, basename, label }, getDailyMessage) {
+  return new Promise((resolve) => {
+    printQueue.push({ kind: 'html', html, basename, label, onDone: (err, jobId) => resolve({ err, jobId }) });
     void drainQueue(db, getDailyMessage);
   });
 }
@@ -357,6 +376,34 @@ async function handlePrintJob(db, docSnap, jobsInFlight, getDailyMessage) {
     });
     if (claim === 'stale') { console.log(`[job] ⏭️ ${id} obsolète → failed`); return; }
     if (claim !== 'claimed') return; // déjà pris par un autre snapshot/instance
+
+    // PASSERELLE GÉNÉRIQUE — HTML déjà rendu en amont (drop-tools & futurs
+    // projets). Aucun rendu par type de ticket ici. C'est le chemin CIBLE : à
+    // terme tous les tickets passent par là et les branches tour/order dégagent.
+    if (data.kind === 'html') {
+      if (!data.html) {
+        await ref.update({ status: 'failed', error: 'job html sans champ `html`' });
+        console.error(`[job] ❌ ${id} : kind:'html' sans html`);
+        return;
+      }
+      console.log(`[job] 🖨️ ${id} (${data.source ?? '?'}) → HTML ${data.template ?? ''}`);
+      const { err, jobId } = await enqueueHtmlPrint(
+        db,
+        {
+          html: data.html,
+          basename: `${data.template || 'job'}-${id.slice(0, 6)}`,
+          label: `Impression ${data.template ?? ''}`.trim(),
+        },
+        getDailyMessage,
+      );
+      if (err) {
+        await ref.update({ status: 'failed', error: err.message });
+      } else {
+        await ref.update({ status: 'printed', printedAt: FieldValue.serverTimestamp() });
+        console.log(`[job] ✅ ${id} → ${jobId}`);
+      }
+      return;
+    }
 
     // AJOUT ISOLÉ — ticket de TOURNÉE : rendu dédié via la file partagée. Le
     // chemin commande (foodOrder) ci-dessous reste INCHANGÉ.
