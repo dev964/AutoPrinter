@@ -37,6 +37,9 @@ loadDotEnv();
 // ── Config (variables d'environnement / .env) ───────────────────────────────
 const SERVICE_ACCOUNT_PATH =
   process.env.SERVICE_ACCOUNT_PATH || process.env.GOOGLE_APPLICATION_CREDENTIALS;
+// Hub d'impression drop-tools (multi-projets) : compte de service du projet
+// drop-tools-91a1c. Optionnel — si absent, seule la file feels est écoutée.
+const DROP_TOOLS_SERVICE_ACCOUNT_PATH = process.env.DROP_TOOLS_SERVICE_ACCOUNT_PATH;
 const KITCHEN_OPERATOR_ID = process.env.KITCHEN_OPERATOR_ID;
 const PRINT_DELAY_MS = Number(process.env.PRINT_DELAY_MS ?? 1200);
 
@@ -334,6 +337,39 @@ async function main() {
       },
       onListenerLost('jobs'),
     );
+
+  // ── Watcher printJobs du HUB drop-tools (multi-projets) ─────────────────────
+  // 2e app Firebase branchée sur le projet drop-tools : n'importe quel projet y
+  // enfile un job `kind:'html'` (rendu en amont) → même passerelle, même file
+  // d'impression. Additif : n'altère PAS l'écoute feels ci-dessus. Sans le compte
+  // de service (env absent), on n'y touche pas.
+  if (DROP_TOOLS_SERVICE_ACCOUNT_PATH && fs.existsSync(DROP_TOOLS_SERVICE_ACCOUNT_PATH)) {
+    try {
+      const dtSa = require(require('path').resolve(DROP_TOOLS_SERVICE_ACCOUNT_PATH));
+      const dtApp = admin.initializeApp(
+        { credential: admin.credential.cert(dtSa) },
+        'droptools',
+      );
+      const dtDb = dtApp.firestore();
+      const dtJobsInFlight = new Set();
+      console.log(`[init] hub drop-tools branché : projet=${dtSa.project_id}`);
+      dtDb.collection('printJobs')
+        .where('status', '==', 'pending')
+        .onSnapshot(
+          (snap) => {
+            for (const change of snap.docChanges()) {
+              if (change.type === 'removed') continue;
+              void handlePrintJob(dtDb, change.doc, dtJobsInFlight, () => dailyLabelMessage);
+            }
+          },
+          onListenerLost('jobs-droptools'),
+        );
+    } catch (e) {
+      console.error('[init] hub drop-tools : init impossible —', e.message);
+    }
+  } else {
+    console.log('[init] hub drop-tools NON branché (DROP_TOOLS_SERVICE_ACCOUNT_PATH absent).');
+  }
 
   console.log('[watch] en écoute : commandes + flag + demandes manuelles… (Ctrl+C pour arrêter)');
 
